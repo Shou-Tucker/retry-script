@@ -1,0 +1,27 @@
+version: '3'
+
+services:
+  retry:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: retry-container
+    environment:
+      - TZ=Asia/Tokyo
+    volumes:
+      - ./logs:/app/logs
+      # Terraformの場合は以下のようなマウントが必要
+      # - ~/.aws:/root/.aws
+      # - ./terraform:/app/terraform
+    command: >
+      --background 
+      -v 
+      -r 20 
+      -i 30 
+      -b 2.0 
+      -m 600 
+      -t 300 
+      -n
+      -d ${DISCORD_WEBHOOK:-}
+      -a ${SLACK_WEBHOOK:-}
+      "your-command-here"

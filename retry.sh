@@ -4,7 +4,7 @@
 # 使用方法: ./retry.sh [オプション] コマンド
 #
 # オプション:
-#   -r, --retries 回数       リトライ回数 (デフォルト: 5)
+#   -r, --retries 回数       リトライ回数 (デフォルト: 5, 0=無限リトライ)
 #   -i, --interval 秒数      リトライ間隔の秒数 (デフォルト: 10)
 #   -b, --backoff 倍率       バックオフの倍率 (デフォルト: 2.0)
 #   -m, --max-interval 秒数  最大リトライ間隔の秒数 (デフォルト: 300)
@@ -17,7 +17,7 @@
 #   -h, --help              ヘルプを表示
 
 # デフォルト値の設定
-MAX_RETRIES=5
+MAX_RETRIES=5    # 0=無限リトライ
 INTERVAL=10
 BACKOFF=2.0
 MAX_INTERVAL=300
@@ -35,7 +35,7 @@ function show_help {
 使用方法: $0 [オプション] コマンド
 
 オプション:
-  -r, --retries 回数       リトライ回数 (デフォルト: $MAX_RETRIES)
+  -r, --retries 回数       リトライ回数 (デフォルト: $MAX_RETRIES, 0=無限リトライ)
   -i, --interval 秒数      リトライ間隔の秒数 (デフォルト: $INTERVAL)
   -b, --backoff 倍率       バックオフの倍率 (デフォルト: $BACKOFF)
   -m, --max-interval 秒数  最大リトライ間隔の秒数 (デフォルト: $MAX_INTERVAL)
@@ -50,7 +50,7 @@ function show_help {
 例:
   $0 "curl -s https://example.com"
   $0 -r 10 -i 5 -b 1.5 "wget https://example.com"
-  $0 -v -t 60 "ssh user@server.example.com uptime"
+  $0 -r 0 -v -t 60 "ssh user@server.example.com uptime"  # 無限リトライ
 EOF
     exit 0
 }
@@ -157,15 +157,26 @@ function retry_command {
     # ログファイルのヘッダー情報を記録
     log "リトライプロセス開始: PID=$pid on $hostname"
     log "コマンド: $COMMAND"
-    log "設定: リトライ回数=$MAX_RETRIES, 間隔=${INTERVAL}秒, バックオフ倍率=${BACKOFF}, 最大間隔=${MAX_INTERVAL}秒"
+    
+    # 無限リトライの場合はメッセージを変更
+    if [ "$MAX_RETRIES" -eq 0 ]; then
+        log "設定: 無限リトライ, 間隔=${INTERVAL}秒, バックオフ倍率=${BACKOFF}, 最大間隔=${MAX_INTERVAL}秒"
+    else
+        log "設定: リトライ回数=$MAX_RETRIES, 間隔=${INTERVAL}秒, バックオフ倍率=${BACKOFF}, 最大間隔=${MAX_INTERVAL}秒"
+    fi
     
     # コマンドを実行するループ
-    while [ $retry_count -le $MAX_RETRIES ]; do
+    while true; do
         # 試行回数を表示
         if [ $retry_count -eq 0 ]; then
             log "コマンドを実行します: $COMMAND"
         else
-            log "リトライ $retry_count/$MAX_RETRIES (間隔: ${current_interval}秒): $COMMAND"
+            # 無限リトライの場合、現在の試行回数を表示
+            if [ "$MAX_RETRIES" -eq 0 ]; then
+                log "リトライ $retry_count (間隔: ${current_interval}秒): $COMMAND"
+            else
+                log "リトライ $retry_count/$MAX_RETRIES (間隔: ${current_interval}秒): $COMMAND"
+            fi
         fi
 
         # 詳細出力モードの場合は開始時刻を表示
@@ -208,8 +219,8 @@ function retry_command {
             log "エラー: コマンドは失敗しました (終了コード: $exit_code)"
         fi
 
-        # 最大リトライ回数を超えた場合は終了
-        if [ $retry_count -ge $MAX_RETRIES ]; then
+        # 無限リトライでない場合、最大リトライ回数を確認
+        if [ "$MAX_RETRIES" -ne 0 ] && [ $retry_count -ge $MAX_RETRIES ]; then
             log "失敗: 最大リトライ回数 ($MAX_RETRIES) に達しました"
             
             # 最大リトライに達した場合、失敗を通知

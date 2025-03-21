@@ -4,12 +4,13 @@
 
 ## 機能
 
-- **自動リトライ**: 設定可能な回数と間隔でコマンドを自動的にリトライ
+- **自動リトライ**: 設定可能な回数と間隔でコマンドを自動的にリトライ（無限リトライ対応）
 - **指数バックオフ**: サーバー負荷を軽減するためにリトライ間隔を徐々に増加
 - **タイムアウト管理**: 長時間実行されるコマンドを自動的に終了
 - **通知機能**: Discord/Slack Webhookを使用して成功または失敗を通知
 - **バックグラウンド実行**: Dockerコンテナを使用してバックグラウンドで実行可能
 - **詳細なログ記録**: すべての動作をログファイルに記録
+- **複数ユーザー対応**: 最大5ユーザーの認証情報を環境変数で管理可能
 
 ## LINE Notifyの代替サービス
 
@@ -46,6 +47,9 @@ chmod +x retry.sh
 # スクリプトの使用例
 ./retry.sh -r 10 -i 5 -t 60 "curl -s https://example.com"
 
+# 無限リトライを使用
+./retry.sh -r 0 -i 5 -t 60 "curl -s https://example.com"
+
 # 通知機能を使用
 ./retry.sh -r 10 -i 5 -n -d "https://discord.com/api/webhooks/your-webhook-url" "terraform apply -auto-approve"
 ```
@@ -63,30 +67,30 @@ docker build -t retry-container .
 # 基本的な使用法
 docker run retry-container "curl -s https://example.com"
 
-# バックグラウンドで実行
-docker run -d retry-container --background -r 20 -i 30 -n -d "your-discord-webhook-url" "terraform apply -auto-approve"
+# バックグラウンドで実行（無限リトライ）
+docker run -d retry-container --background -r 0 -i 30 -n -d "your-discord-webhook-url" "terraform apply -auto-approve"
 
 # 環境変数と共有ボリュームを使用
 docker run -d \
   -e AWS_ACCESS_KEY_ID=your-key \
   -e AWS_SECRET_ACCESS_KEY=your-secret \
   -v $(pwd)/terraform:/app/terraform \
-  retry-container --background -r 30 -i 60 -n -d "your-discord-webhook" "cd /app/terraform && terraform apply -auto-approve"
+  retry-container --background -r 0 -i 60 -n -d "your-discord-webhook" "cd /app/terraform && terraform apply -auto-approve"
 ```
 
-### 3. Docker Composeを使用する
+### 3. Docker Composeを使用する（単一ユーザー）
 
 ```bash
 # リポジトリをクローン
 git clone https://github.com/Shou-Tucker/retry-script.git
 cd retry-script
 
-# 設定ファイルを編集
-# docker-compose.ymlを編集して、実行するコマンドとWebhook URLを設定します
+# .env.exampleをコピーして.envを作成
+cp .env.example .env
 
-# 環境変数としてWebhook URLを設定
-export DISCORD_WEBHOOK=https://discord.com/api/webhooks/your-webhook-url
-export SLACK_WEBHOOK=https://hooks.slack.com/services/your-slack-webhook
+# 設定ファイルを編集
+# .envファイルを編集して、認証情報とWebhook URLを設定します
+nano .env
 
 # コンテナを起動
 docker-compose up -d
@@ -95,43 +99,45 @@ docker-compose up -d
 docker-compose logs -f
 ```
 
+### 4. Docker Composeを使用する（複数ユーザー）
+
+5つのユーザーアカウントを使用して同時にリトライを実行できます：
+
+```bash
+# リポジトリをクローン
+git clone https://github.com/Shou-Tucker/retry-script.git
+cd retry-script
+
+# .env.exampleをコピーして.envを作成
+cp .env.example .env
+
+# 設定ファイルを編集
+# .envファイルを編集して、5つのユーザーの認証情報とWebhook URLを設定します
+nano .env
+
+# マルチユーザー用のDocker Composeを使用
+docker-compose -f docker-compose-multi-users.yml up -d
+
+# ログを確認
+docker-compose -f docker-compose-multi-users.yml logs -f
+
+# 特定のユーザーのログのみ確認
+docker-compose -f docker-compose-multi-users.yml logs -f retry-user1
+```
+
 ## OCI A1インスタンス取得の例
 
 このスクリプトは、Terraform を使用してOCIのA1インスタンスを取得するシナリオに最適です。以下に例を示します：
 
 ```bash
-# Docker Compose設定例（docker-compose.yml）
-version: '3'
+# 環境変数を設定
+source .env
 
-services:
-  retry:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: oci-instance-retry
-    environment:
-      - TZ=Asia/Tokyo
-      - TF_VAR_tenancy_ocid=${TF_VAR_tenancy_ocid}
-      - TF_VAR_user_ocid=${TF_VAR_user_ocid}
-      - TF_VAR_fingerprint=${TF_VAR_fingerprint}
-      - TF_VAR_private_key_path=/root/.oci/private.pem
-    volumes:
-      - ./terraform:/app/terraform
-      - ~/.oci:/root/.oci
-    command: >
-      --background 
-      -v 
-      -r 100 
-      -i 30 
-      -b 1.5 
-      -m 300 
-      -t 600 
-      -n
-      -d ${DISCORD_WEBHOOK}
-      "cd /app/terraform && terraform apply -auto-approve"
+# A1インスタンスが取得できるまで無限にリトライ
+docker-compose -f docker-compose-multi-users.yml up -d
 ```
 
-このコンフィグレーションでは、OCIのA1インスタンスが利用可能になるまで最大100回のリトライを行い、成功するとDiscordで通知します。
+このコンフィグレーションでは、5つのユーザーアカウントを使って、A1インスタンスが利用可能になるまで無限にリトライを行い、成功するとDiscordやSlackで通知します。
 
 ## オプションとパラメータ
 
@@ -139,7 +145,7 @@ services:
 
 | オプション | 説明 | デフォルト値 |
 |----------|------|------------|
-| `-r, --retries` | リトライ回数 | 5 |
+| `-r, --retries` | リトライ回数（0=無限リトライ） | 5 |
 | `-i, --interval` | 初期リトライ間隔（秒） | 10 |
 | `-b, --backoff` | バックオフ倍率 | 2.0 |
 | `-m, --max-interval` | 最大リトライ間隔（秒） | 300 |
@@ -150,6 +156,29 @@ services:
 | `-d, --discord-webhook` | Discord Webhook URL | - |
 | `-a, --slack-webhook` | Slack Webhook URL | - |
 | `-h, --help` | ヘルプを表示 | - |
+
+## 環境変数ファイル(.env)
+
+複数ユーザー対応モードでは、以下の環境変数を設定できます：
+
+```bash
+# ユーザー1〜5の設定
+USER1_TENANCY_OCID=your-tenancy-ocid-1
+USER1_USER_OCID=your-user-ocid-1
+USER1_FINGERPRINT=your-fingerprint-1
+USER1_PRIVATE_KEY_PATH=~/.oci/user1/private.pem
+USER1_REGION=ap-tokyo-1
+
+# 共通OCI設定
+OCI_COMPARTMENT_ID=your-compartment-id
+OCI_AVAILABILITY_DOMAIN=your-availability-domain
+OCI_SUBNET_ID=your-subnet-id
+OCI_IMAGE_ID=your-image-id
+
+# 通知設定
+DISCORD_WEBHOOK=https://discord.com/api/webhooks/your-webhook-url
+SLACK_WEBHOOK=https://hooks.slack.com/services/your-slack-webhook
+```
 
 ## ログと監視
 
@@ -164,6 +193,7 @@ services:
 - バックグラウンドで実行する場合、ホストシステムのリソースを監視することをお勧めします
 - 非常に長時間実行されるコマンドの場合、システムの再起動などに注意が必要です
 - センシティブな認証情報は環境変数として渡すことをお勧めします
+- 無限リトライを使用する場合は、正常終了条件を明確にしてください
 
 ## トラブルシューティング
 
@@ -179,6 +209,10 @@ services:
 
 3. **コマンドが常にタイムアウトする**
    - `-t` オプションでタイムアウト時間を増やしてください
+
+4. **複数ユーザーモードでエラーが発生する**
+   - 各ユーザーの秘密鍵が正しいパスにあるか確認してください
+   - 各ユーザーの環境変数が正しく設定されているか確認してください
 
 ## 貢献
 
